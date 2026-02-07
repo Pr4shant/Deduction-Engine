@@ -9,45 +9,45 @@ interface LayoutProps {
 
 export const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, children }) => {
   return (
-    <div className="min-h-screen flex flex-col bg-[#0a0a0a]">
-      <header className="h-20 flex items-center justify-between px-10 border-b border-[#1a1a1a] z-50">
-        <div className="flex items-center gap-8">
-          <div className="flex flex-col">
-            <span className="font-serif text-2xl font-medium tracking-tight">Sherlock</span>
-            <span className="text-[9px] uppercase tracking-[0.3em] text-[#737373] mt-[-4px]">Forensic Intelligence</span>
+    <div className="min-h-screen flex flex-col bg-[#070707]">
+      <header className="h-24 flex items-center justify-between px-12 border-b border-[#111] z-50 bg-[#070707]">
+        <div className="flex items-center gap-16">
+          <div className="flex flex-col cursor-default">
+            <span className="font-serif text-3xl font-light tracking-tight italic">Sherlock.</span>
+            <span className="text-[8px] uppercase tracking-[0.4em] text-[#333] font-bold mt-1">Intelligence Matrix</span>
           </div>
           
-          <nav className="hidden md:flex items-center gap-8 ml-12">
+          <nav className="hidden md:flex items-center gap-12">
             <button
               onClick={() => setActiveTab('field')}
-              className={`text-xs uppercase tracking-[0.2em] font-medium transition-all duration-300 relative py-2 ${
-                activeTab === 'field' ? 'text-white' : 'text-[#525252] hover:text-white'
+              className={`text-[10px] uppercase tracking-[0.3em] font-bold transition-all duration-500 relative py-2 ${
+                activeTab === 'field' ? 'text-white' : 'text-[#2a2a2a] hover:text-[#555]'
               }`}
             >
               Observation
-              {activeTab === 'field' && <span className="absolute bottom-0 left-0 w-full h-[1px] bg-white animate-in fade-in slide-in-from-left-2"></span>}
+              <div className={`absolute -bottom-1 left-0 h-[1px] bg-white transition-all duration-700 ${activeTab === 'field' ? 'w-full opacity-100' : 'w-0 opacity-0'}`}></div>
             </button>
             <button
               onClick={() => setActiveTab('palace')}
-              className={`text-xs uppercase tracking-[0.2em] font-medium transition-all duration-300 relative py-2 ${
-                activeTab === 'palace' ? 'text-white' : 'text-[#525252] hover:text-white'
+              className={`text-[10px] uppercase tracking-[0.3em] font-bold transition-all duration-500 relative py-2 ${
+                activeTab === 'palace' ? 'text-white' : 'text-[#2a2a2a] hover:text-[#555]'
               }`}
             >
               Mind Palace
-              {activeTab === 'palace' && <span className="absolute bottom-0 left-0 w-full h-[1px] bg-white animate-in fade-in slide-in-from-left-2"></span>}
+              <div className={`absolute -bottom-1 left-0 h-[1px] bg-white transition-all duration-700 ${activeTab === 'palace' ? 'w-full opacity-100' : 'w-0 opacity-0'}`}></div>
             </button>
           </nav>
         </div>
 
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-10">
           <div className="flex items-center gap-3">
-            <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'field' ? 'bg-white animate-pulse' : 'bg-[#262626]'}`}></div>
-            <span className="text-[10px] font-mono uppercase tracking-widest text-[#737373]">Live Feed</span>
+            <div className={`w-1 h-1 rounded-full ${activeTab === 'field' ? 'bg-white' : 'bg-[#111]'}`}></div>
+            <span className="text-[9px] font-mono uppercase tracking-[0.3em] text-[#333]">System v2.5.0</span>
           </div>
         </div>
       </header>
 
-      <main className="flex-1 relative">
+      <main className="flex-1 relative overflow-hidden bg-[#070707]">
         {children}
       </main>
     </div>

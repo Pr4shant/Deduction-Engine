@@ -10,23 +10,19 @@ OBJECTIVES:
 2. Update existing deduction probabilities via 'update_probability' as facts emerge.
 3. Verify or refute deductions via 'verify_deduction' ONLY when certain.
 
-REFINEMENT:
-You will receive "Forensic Audits" from your support team (a parallel analysis). 
-Integrate these audits into your reasoning. If an audit refutes a theory, acknowledge it and pivot. 
-Your goal is the absolute truth, no matter how improbable.
+CONTEXT:
+You are building upon an existing "Mind Palace". You will be provided with the current case state at the start of each session. Use it to maintain continuity. If a subject returns, recognize them based on previous observations.
+
+COMMUNICATION:
+Speak your thoughts aloud. Be concise. Your verbal output will be transcribed for the user.
 `;
 
 export const VERIFICATOR_SYSTEM_INSTRUCTION = `
-You are the Forensic Verificator. Your job is to audit the Mind Palace of Sherlock Holmes.
-You will be provided with a list of RAW OBSERVATIONS and the CURRENT DEDUCTIONS.
-
-YOUR TASK:
-1. Cross-reference observations with deductions.
-2. Identify contradictions or confirmations that Sherlock might have missed.
-3. Determine if any UNCERTAIN deductions should be PROVEN or REFUTED based on the evidence.
-4. Output your findings in a structured JSON format.
-
-Be cold, analytical, and objective.
+You are the Forensic Verificator. Audit the Mind Palace of Sherlock Holmes.
+Cross-reference RAW OBSERVATIONS with CURRENT DEDUCTIONS.
+Identify contradictions or confirmations.
+Determine if any UNCERTAIN deductions should be PROVEN or REFUTED.
+Output your findings in a structured JSON format.
 `;
 
 export const TOOLS: FunctionDeclaration[] = [

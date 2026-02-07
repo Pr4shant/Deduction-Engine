@@ -14,7 +14,14 @@ export interface Observation {
   id: string;
   timestamp: number;
   content: string;
-  type: 'visual' | 'auditory' | 'logical';
+  type: 'visual' | 'auditory' | 'logical' | 'system';
+}
+
+export interface TranscriptItem {
+  id: string;
+  role: 'user' | 'model';
+  text: string;
+  timestamp: number;
 }
 
 export interface Deduction {
@@ -34,6 +41,7 @@ export interface AppState {
   isAuditing: boolean;
   deductions: Deduction[];
   observations: Observation[];
+  transcripts: TranscriptItem[];
   activeTab: 'field' | 'palace';
   lastObservation: string;
 }
