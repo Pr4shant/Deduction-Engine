@@ -19,7 +19,10 @@ export const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, childre
           
           <nav className="hidden md:flex items-center gap-12">
             <button
-              onClick={() => setActiveTab('field')}
+              onClick={() => {
+                setActiveTab('field');
+                console.log('Active tab set to field');
+              }}
               className={`text-[10px] uppercase tracking-[0.3em] font-bold transition-all duration-500 relative py-2 ${
                 activeTab === 'field' ? 'text-white' : 'text-[#2a2a2a] hover:text-[#555]'
               }`}
@@ -28,7 +31,10 @@ export const Layout: React.FC<LayoutProps> = ({ activeTab, setActiveTab, childre
               <div className={`absolute -bottom-1 left-0 h-[1px] bg-white transition-all duration-700 ${activeTab === 'field' ? 'w-full opacity-100' : 'w-0 opacity-0'}`}></div>
             </button>
             <button
-              onClick={() => setActiveTab('palace')}
+              onClick={() => {
+                setActiveTab('palace');
+                console.log('Active tab set to palace');
+              }}
               className={`text-[10px] uppercase tracking-[0.3em] font-bold transition-all duration-500 relative py-2 ${
                 activeTab === 'palace' ? 'text-white' : 'text-[#2a2a2a] hover:text-[#555]'
               }`}

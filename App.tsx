@@ -70,7 +70,8 @@ const App: React.FC = () => {
         return {
           ...parsed,
           isAnalyzing: false,
-          isAuditing: false
+          isAuditing: false,
+          activeTab: parsed.activeTab || 'field'
         };
       } catch (e) {
         console.error("Failed to parse saved state", e);
@@ -90,9 +91,9 @@ const App: React.FC = () => {
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
 
   useEffect(() => {
-    const { isAnalyzing, isAuditing, activeTab, ...persistentData } = state;
+    const { isAnalyzing, isAuditing, ...persistentData } = state;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persistentData));
-  }, [state.deductions, state.observations, state.transcripts]);
+  }, [state.deductions, state.observations, state.transcripts, state.activeTab]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
