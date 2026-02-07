@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
-import { Deduction, DeductionStatus, AppState } from './types';
-import { SHERLOCK_SYSTEM_INSTRUCTION, TOOLS } from './constants';
+import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
+import { Deduction, DeductionStatus, AppState, Observation } from './types';
+import { SHERLOCK_SYSTEM_INSTRUCTION, TOOLS, VERIFICATOR_SYSTEM_INSTRUCTION } from './constants';
 import { Layout } from './components/Layout';
 import { DeductionCard } from './components/DeductionCard';
 import { 
@@ -12,20 +12,24 @@ import {
   encode 
 } from './services/geminiService';
 
-const FRAME_RATE = 2;
-const JPEG_QUALITY = 0.6;
+const FRAME_RATE = 1; // Lowered for more deliberate analysis
+const JPEG_QUALITY = 0.5;
+const AUDIT_INTERVAL = 20000; // Audit every 20 seconds
 
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>({
     isAnalyzing: false,
+    isAuditing: false,
     deductions: [],
+    observations: [],
     activeTab: 'field',
-    lastObservation: 'System idle. Waiting for visual input.'
+    lastObservation: 'System idle.'
   });
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameIntervalRef = useRef<number | null>(null);
+  const auditIntervalRef = useRef<number | null>(null);
   const nextStartTimeRef = useRef(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const sessionPromiseRef = useRef<any>(null);
@@ -43,6 +47,22 @@ const App: React.FC = () => {
       };
     }
     return audioContextsRef.current;
+  };
+
+  const addObservation = (content: string, type: 'visual' | 'auditory' | 'logical') => {
+    setState(prev => {
+      const newObs: Observation = {
+        id: Math.random().toString(36).substr(2, 9),
+        timestamp: Date.now(),
+        content,
+        type
+      };
+      return {
+        ...prev,
+        observations: [...prev.observations, newObs].slice(-50), // Keep last 50
+        lastObservation: content
+      };
+    });
   };
 
   const handleToolCall = (fc: any) => {
@@ -64,6 +84,8 @@ const App: React.FC = () => {
           updatedAt: Date.now()
         };
         newDeductions.unshift(newDeduction);
+        // Explicitly don't add observation here to avoid loop, 
+        // the record itself is the "logical" observation.
       } else if (name === 'update_probability') {
         const idx = newDeductions.findIndex(d => d.id === args.id || d.title.toLowerCase().includes(args.id.toLowerCase()));
         if (idx !== -1) {
@@ -96,12 +118,109 @@ const App: React.FC = () => {
           functionResponses: {
             id: callId,
             name: name,
-            response: { result: "Case file updated." },
+            response: { result: "Acknowledged." },
           }
         });
       });
     }
   };
+
+  const runForensicAudit = async () => {
+    if (!state.isAnalyzing || state.deductions.length === 0) return;
+
+    setState(prev => ({ ...prev, isAuditing: true }));
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+      const prompt = `
+        OBSERVATIONS:
+        ${state.observations.map(o => `[${o.type}] ${o.content}`).join('\n')}
+
+        CURRENT DEDUCTIONS:
+        ${state.deductions.map(d => `- ID: ${d.id}, Title: ${d.title}, Status: ${d.status}, Prob: ${d.probability}%`).join('\n')}
+
+        Audit the deductions. If any are confirmed or refuted by observations, specify them. 
+        Return a list of refinements for Sherlock.
+      `;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-pro-preview',
+        config: {
+          systemInstruction: VERIFICATOR_SYSTEM_INSTRUCTION,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              verifications: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    deductionId: { type: Type.STRING },
+                    status: { type: Type.STRING, enum: ['PROVEN', 'REFUTED', 'STILL_UNCERTAIN'] },
+                    reason: { type: Type.STRING }
+                  },
+                  required: ['deductionId', 'status', 'reason']
+                }
+              },
+              newObservations: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: "New patterns detected during audit"
+              }
+            }
+          }
+        },
+        contents: prompt
+      });
+
+      const auditResult = JSON.parse(response.text || '{}');
+      
+      // Update state based on audit
+      if (auditResult.verifications) {
+        auditResult.verifications.forEach((v: any) => {
+          if (v.status !== 'STILL_UNCERTAIN') {
+            handleToolCall({
+              name: 'verify_deduction',
+              args: { id: v.deductionId, status: v.status, final_reasoning: `[AUDIT]: ${v.reason}` },
+              id: `audit-${Date.now()}`
+            });
+          }
+        });
+      }
+
+      // Feed audit back to Sherlock
+      if (sessionPromiseRef.current && (auditResult.verifications?.length || auditResult.newObservations?.length)) {
+        sessionPromiseRef.current.then((session: any) => {
+          session.sendRealtimeInput({
+            media: {
+              data: encode(new TextEncoder().encode(`System Audit: Verified ${auditResult.verifications?.length} threads. Focus on: ${auditResult.newObservations?.join(', ') || 'Current path'}.`)),
+              mimeType: 'text/plain' // Sending as text part via data blob if supported or just separate call
+            }
+          });
+          // Note: Since standard sendRealtimeInput takes 'media', we often just send text as a message if the SDK allows.
+          // For this implementation, we'll assume Sherlock sees the "logical" refinement in state if we were sharing context,
+          // but for Live API, we can send a text message part.
+          session.sendRealtimeInput({
+            text: `AUDIT REPORT: ${auditResult.verifications?.map((v:any) => v.reason).join('. ')}`
+          });
+        });
+      }
+
+    } catch (err) {
+      console.error("Forensic audit failed.", err);
+    } finally {
+      setState(prev => ({ ...prev, isAuditing: false }));
+    }
+  };
+
+  useEffect(() => {
+    if (state.isAnalyzing) {
+      auditIntervalRef.current = window.setInterval(runForensicAudit, AUDIT_INTERVAL);
+    } else {
+      if (auditIntervalRef.current) clearInterval(auditIntervalRef.current);
+    }
+    return () => { if (auditIntervalRef.current) clearInterval(auditIntervalRef.current); };
+  }, [state.isAnalyzing, state.deductions, state.observations]);
 
   const startAnalysis = async () => {
     if (state.isAnalyzing) return;
@@ -124,7 +243,8 @@ const App: React.FC = () => {
           tools: [{ functionDeclarations: TOOLS }],
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }
-          }
+          },
+          outputAudioTranscription: {}
         },
         callbacks: {
           onopen: () => {
@@ -165,7 +285,14 @@ const App: React.FC = () => {
             }, 1000 / FRAME_RATE);
           },
           onmessage: async (message: LiveServerMessage) => {
-            if (message.toolCall) message.toolCall.functionCalls.forEach(handleToolCall);
+            if (message.toolCall) {
+              message.toolCall.functionCalls.forEach(handleToolCall);
+            }
+
+            if (message.serverContent?.outputTranscription) {
+              addObservation(message.serverContent.outputTranscription.text, 'auditory');
+            }
+
             const audioData = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
             if (audioData) {
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputCtx.currentTime);
@@ -186,12 +313,13 @@ const App: React.FC = () => {
       sessionPromiseRef.current = sessionPromise;
       setState(prev => ({ ...prev, isAnalyzing: true }));
     } catch (err) {
-      console.error("Session failed to initialize.", err);
+      console.error("Session failed.", err);
     }
   };
 
   const stopAnalysis = () => {
     if (frameIntervalRef.current) clearInterval(frameIntervalRef.current);
+    if (auditIntervalRef.current) clearInterval(auditIntervalRef.current);
     if (sessionPromiseRef.current) sessionPromiseRef.current.then((s: any) => s.close());
     if (videoRef.current?.srcObject) (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
     setState(prev => ({ ...prev, isAnalyzing: false }));
@@ -202,13 +330,13 @@ const App: React.FC = () => {
       {/* Observation View */}
       <div className={`absolute inset-0 transition-all duration-700 ease-in-out transform ${state.activeTab === 'field' ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0 pointer-events-none'}`}>
         <div className="h-full flex flex-col p-10 gap-10">
-          <div className="flex-1 relative bg-black flex items-center justify-center group">
+          <div className="flex-1 relative bg-black flex items-center justify-center group rounded-sm overflow-hidden border border-[#1a1a1a]">
             <video 
               ref={videoRef} 
               autoPlay 
               playsInline 
               muted 
-              className="w-full h-full object-cover grayscale opacity-80 transition-all duration-1000 group-hover:grayscale-0 group-hover:opacity-100"
+              className="w-full h-full object-cover grayscale opacity-70 transition-all duration-1000 group-hover:grayscale-0 group-hover:opacity-100"
             />
             <canvas ref={canvasRef} className="hidden" />
             
@@ -216,39 +344,50 @@ const App: React.FC = () => {
             
             {!state.isAnalyzing ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-8 bg-black/40 backdrop-blur-sm transition-all">
-                <h2 className="font-serif text-4xl text-neutral-200 tracking-tight">Begin Field Observation</h2>
+                <h2 className="font-serif text-4xl text-neutral-200 tracking-tight">Case: Visual Evidence</h2>
                 <button 
                   onClick={startAnalysis}
                   className="px-12 py-4 border border-white/20 hover:border-white text-xs uppercase tracking-[0.4em] transition-all bg-white/5 hover:bg-white hover:text-black"
                 >
-                  Activate Intelligence
+                  Initiate Scan
                 </button>
               </div>
             ) : (
-              <div className="absolute bottom-12 left-1/2 -translate-x-1/2">
+              <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-6">
                 <button 
                   onClick={stopAnalysis}
                   className="px-10 py-3 border border-red-900/40 hover:border-red-500 text-[10px] uppercase tracking-[0.3em] text-red-500 hover:bg-red-500/10 transition-all"
                 >
-                  End Observation
+                  Cease
                 </button>
+                {state.isAuditing && (
+                  <div className="flex items-center gap-3 px-6 py-3 border border-white/10 bg-black/50 backdrop-blur">
+                    <div className="w-2 h-2 bg-white animate-ping rounded-full"></div>
+                    <span className="text-[10px] uppercase tracking-[0.2em] text-neutral-400">Performing Forensic Audit</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
 
           <div className="h-40 flex gap-10 border-t border-[#1a1a1a] pt-10">
             <div className="flex-1 flex flex-col justify-center">
-              <span className="text-[9px] uppercase tracking-[0.3em] text-[#525252] mb-3">Live Deduction Stream</span>
+              <span className="text-[9px] uppercase tracking-[0.3em] text-[#525252] mb-3">Live Feed Synthesis</span>
               <div className="font-serif text-lg text-neutral-300 italic h-12 overflow-hidden flex items-center">
-                {state.deductions.length > 0 
-                  ? `"${state.deductions[0].description.substring(0, 120)}..."`
-                  : "Scanning surroundings for noteworthy patterns..."}
+                {state.lastObservation}
               </div>
             </div>
-            <div className="w-64 border-l border-[#1a1a1a] pl-10 flex flex-col justify-center">
-              <span className="text-[9px] uppercase tracking-[0.3em] text-[#525252] mb-1">Case Progress</span>
-              <div className="text-3xl font-serif text-white">{state.deductions.length}</div>
-              <span className="text-[9px] text-[#404040] uppercase tracking-widest">Active Threads</span>
+            <div className="w-80 border-l border-[#1a1a1a] pl-10 flex flex-col justify-center">
+              <span className="text-[9px] uppercase tracking-[0.3em] text-[#525252] mb-1">Active Hypothesis Tree</span>
+              <div className="flex items-end gap-2">
+                <div className="text-3xl font-serif text-white">{state.deductions.length}</div>
+                <div className="text-[10px] text-[#404040] uppercase tracking-widest mb-1">Threads Found</div>
+              </div>
+              <div className="mt-2 flex gap-1">
+                {state.deductions.slice(0, 10).map(d => (
+                  <div key={d.id} className={`h-1 flex-1 ${d.status === DeductionStatus.PROVEN ? 'bg-white' : d.status === DeductionStatus.REFUTED ? 'bg-red-900' : 'bg-[#262626]'}`}></div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -258,7 +397,12 @@ const App: React.FC = () => {
       <div className={`absolute inset-0 overflow-y-auto transition-all duration-700 ease-in-out transform ${state.activeTab === 'palace' ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0 pointer-events-none'}`}>
         <div className="px-20 py-20 max-w-7xl mx-auto">
           <header className="mb-20">
-            <h1 className="font-serif text-6xl text-neutral-100 mb-6 tracking-tight">The Mind Palace</h1>
+            <div className="flex justify-between items-start mb-6">
+               <h1 className="font-serif text-6xl text-neutral-100 tracking-tight">The Mind Palace</h1>
+               {state.isAuditing && (
+                 <span className="text-[10px] uppercase tracking-[0.4em] text-white animate-pulse mt-6">Audit in progress</span>
+               )}
+            </div>
             <div className="flex items-center gap-12 border-t border-[#1a1a1a] pt-8">
               <div className="flex flex-col">
                 <span className="text-2xl font-serif text-neutral-200">{state.deductions.filter(d => d.status === DeductionStatus.PROVEN).length}</span>
@@ -277,10 +421,10 @@ const App: React.FC = () => {
 
           {state.deductions.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-40 border-t border-[#1a1a1a]">
-              <p className="font-serif italic text-2xl text-[#404040]">The archive is currently void of certainties.</p>
+              <p className="font-serif italic text-2xl text-[#404040]">The archive awaits a first observation.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 pb-20">
               {state.deductions.map(deduction => (
                 <DeductionCard key={deduction.id} deduction={deduction} />
               ))}

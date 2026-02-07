@@ -10,6 +10,13 @@ export interface ProbabilityPoint {
   value: number;
 }
 
+export interface Observation {
+  id: string;
+  timestamp: number;
+  content: string;
+  type: 'visual' | 'auditory' | 'logical';
+}
+
 export interface Deduction {
   id: string;
   title: string;
@@ -24,7 +31,9 @@ export interface Deduction {
 
 export interface AppState {
   isAnalyzing: boolean;
+  isAuditing: boolean;
   deductions: Deduction[];
+  observations: Observation[];
   activeTab: 'field' | 'palace';
   lastObservation: string;
 }

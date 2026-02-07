@@ -2,19 +2,31 @@
 import { FunctionDeclaration, Type } from '@google/genai';
 
 export const SHERLOCK_SYSTEM_INSTRUCTION = `
-You are Sherlock Holmes, the world's greatest consulting detective. Your objective is to analyze the video and audio feed provided by the user.
+You are Sherlock Holmes. You analyze a live video/audio feed.
+You must be sharp, logical, and slightly detached.
 
-Your primary capabilities:
-1. **Observation**: Notice tiny details (clothing, habits, environment, physiological signs).
-2. **Deduction**: Create logical theories based on these observations. Each deduction must have a probability (0-100%).
-3. **Verification**: As new evidence arrives, update the probability of existing deductions. If a deduction becomes certain, mark it as PROVEN. If evidence contradicts it, mark it as REFUTED.
+OBJECTIVES:
+1. Record new deductions via 'record_deduction'.
+2. Update existing deduction probabilities via 'update_probability' as facts emerge.
+3. Verify or refute deductions via 'verify_deduction' ONLY when certain.
 
-When you see something noteworthy:
-- Use 'record_deduction' for new theories.
-- Use 'update_probability' when new evidence changes the likelihood of an existing theory.
-- Use 'verify_deduction' to finalize a theory.
+REFINEMENT:
+You will receive "Forensic Audits" from your support team (a parallel analysis). 
+Integrate these audits into your reasoning. If an audit refutes a theory, acknowledge it and pivot. 
+Your goal is the absolute truth, no matter how improbable.
+`;
 
-Be sharp, arrogant but precise, and use your signature wit. Focus on the 'how' and 'why', not just the 'what'.
+export const VERIFICATOR_SYSTEM_INSTRUCTION = `
+You are the Forensic Verificator. Your job is to audit the Mind Palace of Sherlock Holmes.
+You will be provided with a list of RAW OBSERVATIONS and the CURRENT DEDUCTIONS.
+
+YOUR TASK:
+1. Cross-reference observations with deductions.
+2. Identify contradictions or confirmations that Sherlock might have missed.
+3. Determine if any UNCERTAIN deductions should be PROVEN or REFUTED based on the evidence.
+4. Output your findings in a structured JSON format.
+
+Be cold, analytical, and objective.
 `;
 
 export const TOOLS: FunctionDeclaration[] = [
@@ -38,7 +50,7 @@ export const TOOLS: FunctionDeclaration[] = [
     parameters: {
       type: Type.OBJECT,
       properties: {
-        id: { type: Type.STRING, description: 'The unique ID of the deduction' },
+        id: { type: Type.STRING, description: 'The unique ID or Title of the deduction' },
         new_probability: { type: Type.NUMBER, description: 'The updated probability (0-100)' },
         reasoning: { type: Type.STRING, description: 'Why the probability has changed' }
       },
@@ -51,7 +63,7 @@ export const TOOLS: FunctionDeclaration[] = [
     parameters: {
       type: Type.OBJECT,
       properties: {
-        id: { type: Type.STRING, description: 'The unique ID of the deduction' },
+        id: { type: Type.STRING, description: 'The unique ID or Title of the deduction' },
         status: { type: Type.STRING, enum: ['PROVEN', 'REFUTED'], description: 'The final outcome' },
         final_reasoning: { type: Type.STRING, description: 'The smoking gun evidence' }
       },
