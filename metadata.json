@@ -1,0 +1,8 @@
+{
+  "name": "Copy of AI Sherlock: The Digital Mind Palace",
+  "description": "A high-tech deduction engine that analyzes live video feeds to uncover hidden details, calculate probabilities of truth, and track the evolution of a case in real-time.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
