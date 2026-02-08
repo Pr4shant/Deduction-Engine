@@ -14,8 +14,8 @@ import {
 
 const FRAME_RATE = 1;
 const JPEG_QUALITY = 0.5;
-const STORAGE_KEY = 'aegis_engine_state_v8';
-const AUTO_AUDIT_INTERVAL = 45000; 
+const STORAGE_KEY = 'aegis_engine_state_v10';
+const AUTO_AUDIT_INTERVAL = 60000; 
 
 const AudioVisualizer: React.FC<{ stream: MediaStream | null }> = ({ stream }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -68,7 +68,6 @@ const App: React.FC = () => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Ensure activeTab is always set to field on fresh load/refresh
         return { ...defaults, ...parsed, isAnalyzing: false, isAuditing: false, activeTab: 'field' };
       } catch (e) { console.error("Restore failed", e); }
     }
@@ -114,19 +113,8 @@ const App: React.FC = () => {
     return audioContextsRef.current;
   };
 
-  const addObservation = (content: string, type: Observation['type']) => {
-    setState(prev => ({
-      ...prev,
-      observations: [...prev.observations, {
-        id: Math.random().toString(36).substr(2, 9),
-        timestamp: Date.now(), content, type
-      }].slice(-100),
-      lastObservation: content
-    }));
-  };
-
   const addTranscript = (text: string, role: 'user' | 'model') => {
-    const cleanText = text.replace(/<[^>]*>/g, '').replace(/\[SYSTEM\].*/g, '').trim();
+    const cleanText = text.replace(/<[^>]*>/g, '').trim();
     if (!cleanText) return;
 
     setState(prev => ({
@@ -138,16 +126,38 @@ const App: React.FC = () => {
     }));
   };
 
+  const captureHighResFrame = (): Promise<string | null> => {
+    return new Promise((resolve) => {
+      if (canvasRef.current && videoRef.current && state.isAnalyzing) {
+        const ctx = canvasRef.current.getContext('2d');
+        if (ctx) {
+          canvasRef.current.width = videoRef.current.videoWidth;
+          canvasRef.current.height = videoRef.current.videoHeight;
+          ctx.drawImage(videoRef.current, 0, 0);
+          canvasRef.current.toBlob((blob) => {
+            if (blob) {
+              blobToBase64(blob).then(resolve);
+            } else {
+              resolve(null);
+            }
+          }, 'image/jpeg', 0.9);
+        } else { resolve(null); }
+      } else { resolve(null); }
+    });
+  };
+
   const updatePalaceState = (name: string, args: any) => {
     if (!args) return;
     setState(prev => {
       const newDeductions = [...prev.deductions];
+      const searchId = (args.id || args.title || "").toLowerCase();
+      
       if (name === 'record_deduction') {
         const id = Math.random().toString(36).substr(2, 9);
         newDeductions.unshift({
           id,
-          title: args.title || "Observation Node",
-          description: args.description || "",
+          title: args.title || "Logical Vector",
+          description: args.description || "Synthesizing deep variables...",
           probability: args.probability ?? 50,
           history: [{ timestamp: Date.now(), value: args.probability ?? 50 }],
           status: DeductionStatus.UNCERTAIN,
@@ -156,7 +166,6 @@ const App: React.FC = () => {
           updatedAt: Date.now()
         });
       } else if (name === 'update_probability') {
-        const searchId = (args.id || args.title || "").toLowerCase();
         const idx = newDeductions.findIndex(d => 
           d.id.toLowerCase() === searchId || d.title.toLowerCase().includes(searchId)
         );
@@ -169,7 +178,6 @@ const App: React.FC = () => {
           newDeductions[idx] = d;
         }
       } else if (name === 'verify_deduction') {
-        const searchId = (args.id || args.title || "").toLowerCase();
         const idx = newDeductions.findIndex(d => 
           d.id.toLowerCase() === searchId || d.title.toLowerCase().includes(searchId)
         );
@@ -192,19 +200,19 @@ const App: React.FC = () => {
     updatePalaceState(name, args);
     if (sessionPromiseRef.current) {
       sessionPromiseRef.current.then((session: any) => {
-        session.sendToolResponse({ functionResponses: { id: callId, name, response: { result: "AEGIS_MEMORY_SYNCED" } } });
+        session.sendToolResponse({ functionResponses: { id: callId, name, response: { result: "AEGIS_LOCAL_SYNC_OK" } } });
       });
     }
   };
 
   const runDeepForensicAudit = async () => {
-    if (state.isAuditing || state.transcripts.length === 0) return;
+    if (state.isAuditing || state.transcripts.length < 3) return;
     
     setState(prev => ({ ...prev, isAuditing: true }));
     
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const currentLog = state.transcripts.slice(-120).map(t => `[${t.role}]: ${t.text}`).join('\n');
+      const currentLog = state.transcripts.slice(-80).map(t => `[${t.role.toUpperCase()}]: ${t.text}`).join('\n');
       const currentPalace = JSON.stringify(state.deductions.map(d => ({ 
         id: d.id, 
         title: d.title, 
@@ -213,14 +221,22 @@ const App: React.FC = () => {
         evidence: d.evidence.slice(-2)
       })), null, 2);
       
-      const promptText = `--- SENSORY ARCHIVE ---\n${currentLog}\n\n--- CURRENT PALACE MATRIX ---\n${currentPalace}`;
+      const frame = await captureHighResFrame();
+      const promptText = `FORENSIC LOG ARCHIVE:\n${currentLog}\n\nCURRENT LOGICAL MATRIX:\n${currentPalace}`;
       
+      const parts: any[] = [{ text: promptText }];
+      if (frame) {
+        parts.push({ inlineData: { data: frame, mimeType: 'image/jpeg' } });
+      }
+
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: promptText, // Simplified contents for better stability
+        model: 'gemini-3-pro-preview',
+        contents: { parts },
         config: {
           systemInstruction: COGNITION_CORE_INSTRUCTION,
           responseMimeType: 'application/json',
+          thinkingConfig: { thinkingBudget: 4096 },
+          maxOutputTokens: 2048,
           responseSchema: {
             type: Type.OBJECT,
             properties: {
@@ -229,7 +245,7 @@ const App: React.FC = () => {
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    type: { type: Type.STRING },
+                    type: { type: Type.STRING, description: "One of: record_deduction, update_probability, verify_deduction" },
                     args: { 
                       type: Type.OBJECT,
                       properties: {
@@ -248,7 +264,7 @@ const App: React.FC = () => {
                   required: ['type', 'args']
                 }
               },
-              auditSummary: { type: Type.STRING }
+              auditSummary: { type: Type.STRING, description: "Synthesis of new logic identified from visuals and text." }
             },
             required: ['updates', 'auditSummary']
           }
@@ -261,11 +277,10 @@ const App: React.FC = () => {
         if (result.updates && Array.isArray(result.updates)) {
           result.updates.forEach((u: any) => updatePalaceState(u.type, u.args));
         }
-        addObservation(`OMEGA_DEDUCTION: ${result.auditSummary || 'SYNC_COMPLETE'}`, 'logical');
+        setState(prev => ({ ...prev, lastObservation: result.auditSummary || prev.lastObservation }));
       }
     } catch (error) {
-      console.error("Cognition Core Failure:", error);
-      addObservation("OMEGA_FAILURE: Deep matrix sync loop error.", "system");
+      console.error("Sherlock Cognition Core Failure:", error);
     } finally {
       setState(prev => ({ ...prev, isAuditing: false }));
     }
@@ -331,7 +346,6 @@ const App: React.FC = () => {
             if (message.serverContent?.outputTranscription) {
               const text = message.serverContent.outputTranscription.text;
               addTranscript(text, 'model');
-              addObservation(text, 'auditory');
             }
             const audioData = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
             if (audioData) {
@@ -346,7 +360,7 @@ const App: React.FC = () => {
           },
           onclose: () => setState(prev => ({ ...prev, isAnalyzing: false })),
           onerror: (e) => {
-            console.error("AEGIS_LINK_FAILURE:", e);
+            console.error("Real-time sensory error:", e);
             setState(prev => ({ ...prev, isAnalyzing: false }));
           }
         }
@@ -354,8 +368,7 @@ const App: React.FC = () => {
       sessionPromiseRef.current = sessionPromise;
       setState(prev => ({ ...prev, isAnalyzing: true }));
     } catch (err) { 
-      console.error("Link Initiation Failed:", err);
-      alert("Sensor access denied.");
+      console.error("Aegis Link Initiation Failed:", err);
     }
   };
 
@@ -379,13 +392,13 @@ const App: React.FC = () => {
               
               <div className="absolute top-4 left-4 glass-panel px-4 py-2 flex items-center gap-4 z-20">
                 <div className={`w-1.5 h-1.5 rounded-full ${state.isAnalyzing ? 'bg-white animate-pulse' : 'bg-red-900'}`} />
-                <span className="text-[9px] font-mono tracking-[0.2em] text-neutral-400 uppercase">AEGIS-1 Sensory {state.isAnalyzing ? 'ACTIVE' : 'STANDBY'}</span>
+                <span className="text-[9px] font-mono tracking-[0.2em] text-neutral-400 uppercase">AEGIS-1 Sensory {state.isAnalyzing ? 'LIVE' : 'IDLE'}</span>
                 {state.isAnalyzing && <AudioVisualizer stream={mediaStream} />}
               </div>
               {!state.isAnalyzing && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 backdrop-blur-3xl z-10 p-6">
                   <h2 className="font-serif text-3xl md:text-5xl text-white mb-10 tracking-tight italic text-center">Engine Initialized.</h2>
-                  <button onClick={startAnalysis} className="px-14 py-5 border border-white/20 hover:border-white text-[10px] uppercase tracking-[1em] transition-all bg-white/5 hover:bg-white hover:text-black font-black">Engage Sensory Link</button>
+                  <button onClick={startAnalysis} className="px-14 py-5 border border-white/20 hover:border-white text-[10px] uppercase tracking-[1em] transition-all bg-white/5 hover:bg-white hover:text-black font-black">Establish Link</button>
                 </div>
               )}
             </div>
@@ -396,7 +409,7 @@ const App: React.FC = () => {
                   <span className="text-xl md:text-4xl font-serif text-white">{state.deductions.length}</span>
                 </div>
                 <div className="flex flex-col">
-                  <span className="text-[8px] uppercase tracking-[0.3em] text-[#444] mb-1 font-bold">Matrix Certainty</span>
+                  <span className="text-[8px] uppercase tracking-[0.3em] text-[#444] mb-1 font-bold">Global Certainty</span>
                   <span className="text-xl md:text-4xl font-serif text-white">
                     {state.deductions.length > 0 ? Math.round(state.deductions.reduce((a, b) => a + b.probability, 0) / state.deductions.length) : 0}%
                   </span>
@@ -406,10 +419,10 @@ const App: React.FC = () => {
                 <button 
                   onClick={runDeepForensicAudit} 
                   disabled={state.isAuditing || state.transcripts.length < 5} 
-                  className={`hidden md:flex items-center gap-3 px-8 py-2.5 border border-white/10 text-[10px] uppercase tracking-[0.4em] text-neutral-400 hover:text-white hover:border-white/40 transition-all font-black bg-white/5 ${state.isAuditing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className={`hidden md:flex items-center gap-3 px-8 py-2.5 border border-white/10 text-[10px] uppercase tracking-[0.4em] text-neutral-400 hover:text-white hover:border-white/40 transition-all font-black bg-white/5 ${state.isAuditing ? 'cursor-wait' : ''}`}
                 >
                   {state.isAuditing && <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />}
-                  {state.isAuditing ? 'Auditing Matrix...' : 'Cognition Core Force'}
+                  {state.isAuditing ? 'SYNCHRONIZING...' : 'Deep Logic Sync'}
                 </button>
                 {state.isAnalyzing && <button onClick={stopAnalysis} className="px-6 py-2.5 border border-red-900/40 text-[10px] uppercase tracking-[0.3em] text-red-600 hover:bg-red-900/10 transition-colors font-black">Link Kill</button>}
               </div>
@@ -419,7 +432,7 @@ const App: React.FC = () => {
             <div className="flex-1 bg-[#080808] border border-[#1a1a1a] flex flex-col overflow-hidden">
               <div className="p-4 border-b border-[#1a1a1a] flex justify-between items-center bg-[#0a0a0a]">
                 <span className="text-[9px] uppercase tracking-[0.6em] text-[#555] font-black">Sensory Log Archive</span>
-                <span className="text-[8px] uppercase text-neutral-600 font-mono tracking-widest">{state.isAuditing ? 'OMEGA_SYNCING' : 'IDLE'}</span>
+                <span className="text-[8px] uppercase text-neutral-600 font-mono tracking-widest">{state.isAuditing ? 'OMEGA_AUDIT_ACTIVE' : 'IDLE'}</span>
               </div>
               <div className="flex-1 overflow-y-auto p-6 space-y-6 font-serif">
                 {state.transcripts.length === 0 ? (
@@ -429,7 +442,7 @@ const App: React.FC = () => {
                 ) : (
                   state.transcripts.map(t => (
                     <div key={t.id} className={`flex flex-col ${t.role === 'user' ? 'items-end' : 'items-start'}`}>
-                      <span className={`text-[8px] uppercase tracking-[0.4em] mb-1 ${t.role === 'user' ? 'text-[#333]' : 'text-neutral-500'} font-black`}>{t.role === 'user' ? 'INPUT' : 'AEGIS_1'}</span>
+                      <span className={`text-[8px] uppercase tracking-[0.4em] mb-1 ${t.role === 'user' ? 'text-[#333]' : 'text-neutral-500'} font-black`}>{t.role === 'user' ? 'INPUT_S' : 'AEGIS_1'}</span>
                       <p className={`text-[12px] leading-relaxed p-4 rounded-sm ${t.role === 'user' ? 'bg-white/5 text-neutral-500 italic text-right border-r border-white/5' : 'bg-white/10 text-neutral-100 border-l border-white/20'} max-w-[95%]`}>{t.text}</p>
                     </div>
                   ))
@@ -443,27 +456,25 @@ const App: React.FC = () => {
       <div className={`absolute inset-0 overflow-y-auto transition-all duration-1000 ${state.activeTab === 'palace' ? 'opacity-100 translate-y-0' : 'opacity-0 pointer-events-none translate-y-10'}`}>
         <div className="max-w-6xl mx-auto px-6 md:px-12 py-16 md:py-32">
           <header className="mb-24">
-            <h1 className="font-serif text-6xl md:text-[10rem] text-neutral-100 tracking-tighter leading-none mb-12">Cognition Matrix.</h1>
+            <h1 className="font-serif text-6xl md:text-[10rem] text-neutral-100 tracking-tighter leading-none mb-12">Memory Palace.</h1>
             <div className="flex flex-col md:flex-row gap-8 md:gap-24 border-t border-[#1a1a1a] pt-12 items-start md:items-end">
               <div className="flex gap-20">
-                <div><span className="text-6xl font-serif text-white">{state.deductions.filter(d => d.status === DeductionStatus.PROVEN).length}</span><p className="text-[10px] uppercase tracking-[0.6em] text-[#333] mt-3 font-black">Proven Constants</p></div>
-                <div><span className="text-6xl font-serif text-white">{state.deductions.filter(d => d.status === DeductionStatus.REFUTED).length}</span><p className="text-[10px] uppercase tracking-[0.6em] text-[#333] mt-3 font-black">Nullified Vectors</p></div>
+                <div><span className="text-6xl font-serif text-white">{state.deductions.filter(d => d.status === DeductionStatus.PROVEN).length}</span><p className="text-[10px] uppercase tracking-[0.6em] text-[#333] mt-3 font-black">Proven Vectors</p></div>
+                <div><span className="text-6xl font-serif text-white">{state.deductions.filter(d => d.status === DeductionStatus.REFUTED).length}</span><p className="text-[10px] uppercase tracking-[0.6em] text-[#333] mt-3 font-black">Nullified Loops</p></div>
               </div>
               <button 
                 onClick={runDeepForensicAudit} 
                 disabled={state.isAuditing || state.transcripts.length === 0} 
                 className="px-12 py-5 bg-white text-black font-black uppercase tracking-[0.8em] text-[10px] hover:bg-neutral-200 transition-all disabled:opacity-20 flex items-center gap-4"
               >
-                {state.isAuditing ? (
-                  <div className="w-3 h-3 border border-black border-t-transparent rounded-full animate-spin" />
-                ) : null}
-                {state.isAuditing ? 'SYNCHRONIZING...' : 'SYNC COGNITION OMEGA'}
+                {state.isAuditing && <div className="w-3 h-3 border border-black border-t-transparent rounded-full animate-spin" />}
+                {state.isAuditing ? 'SYNCHRONIZING OMEGA...' : 'FORCE COGNITION SYNC'}
               </button>
             </div>
           </header>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-32">
             {state.deductions.length === 0 ? (
-              <div className="col-span-2 py-40 text-center border-t border-[#111] opacity-20"><p className="font-serif italic text-4xl">Waiting for deductive seed.</p></div>
+              <div className="col-span-2 py-40 text-center border-t border-[#111] opacity-20"><p className="font-serif italic text-4xl">Waiting for deductive seeding.</p></div>
             ) : (
               state.deductions.map(d => <DeductionCard key={d.id} deduction={d} />)
             )}
