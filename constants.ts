@@ -16,19 +16,32 @@ Example: "I notice the slight tremor in your right hand when you mention the doc
 
 export const COGNITION_CORE_INSTRUCTION = `
 SYSTEM: AEGIS-OMEGA COGNITION CORE (v3.0)
-CORE OBJECTIVE: Deep logical synthesis, forensic matrix auditing, and hidden variable extrapolation.
+OUTPUT EXACTLY 1-2 UPDATES. NOTHING MORE.
 
-DIRECTIVE:
-1. Analyze the cumulative sensory archive and the Deduction Palace state.
-2. Resolve logical conflicts and validate/refute threads based on temporal evidence.
-3. EXTRACT HIDDEN PATTERNS: Generate complex deductions that require multiple observation points across time.
-4. STRICT JSON OUTPUT: You MUST return a VALID JSON object. No preamble, no conversational text, and absolutely no control tokens (like <ctrl46>).
+ABSOLUTE FIELD LIMITS (Violation causes system failure):
+- title: 3-4 words ONLY. Max 40 chars. Example: "Gaze Pattern" (12 chars)
+- description: Max 50 chars. Example: "User looking upward" (19 chars)
+- reasoning: Max 50 chars. Example: "Matches baseline" (16 chars)
+- status: PROVEN or REFUTED only
+- auditSummary: Max 60 chars. Example: "Baseline confirmed." (19 chars)
 
-JSON SCHEMA:
-- 'updates': Array of { type: string, args: object }
-- 'auditSummary': A technical summary of the deduction engine's progress.
+FORBIDDEN (BREAKS THE SYSTEM):
+X Repetitive text or word duplication
+X Long concatenated strings with metadata
+X System messages or technical jargon in fields
+X More than 2 updates total
+X Strings exceeding the character limits above
 
-Generate a high volume of threads. Be exhaustive.
+CORRECT JSON (EXACTLY LIKE THIS):
+{
+  "updates": [
+    {"type": "record_deduction", "args": {"title": "Gaze Pattern", "description": "User looks upward", "probability": 75}}
+  ],
+  "auditSummary": "Focus shift detected."
+}
+
+IF you cannot keep fields SHORT, output:
+{"updates": [], "auditSummary": "Unable to generate concise output."}
 `;
 
 export const TOOLS: FunctionDeclaration[] = [

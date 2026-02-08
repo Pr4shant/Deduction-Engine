@@ -15,7 +15,77 @@ import {
 const FRAME_RATE = 1;
 const JPEG_QUALITY = 0.5;
 const STORAGE_KEY = 'aegis_engine_state_v10';
-const AUTO_AUDIT_INTERVAL = 60000; 
+const AUTO_AUDIT_INTERVAL = 60000;
+
+// Utility function to attempt JSON repair for common issues
+const safeParseJSON = (text: string): any => {
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    // Detect and truncate oversized string values before parsing
+    let repaired = text;
+    
+    // Fix unescaped newlines
+    repaired = repaired.replace(/([^\\])\n/g, '$1\\n');
+    
+    // Find and truncate abnormally long string values (>500 chars is suspicious)
+    // This catches repetitive/malformed model outputs
+    repaired = repaired.replace(/"([^"\\]|\\.){500,}"/g, (match) => {
+      // Truncate to 100 chars and close the string
+      return '"' + match.substring(1, 101) + '"';
+    });
+    
+    // Handle incomplete/truncated JSON
+    if (!repaired.trim().endsWith('}')) {
+      // Find the last complete closing brace by counting braces carefully
+      let lastValidPos = -1;
+      let braceDepth = 0;
+      let inString = false;
+      let escaped = false;
+      
+      for (let i = 0; i < repaired.length; i++) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (repaired[i] === '\\') {
+          escaped = true;
+          continue;
+        }
+        if (repaired[i] === '"') {
+          inString = !inString;
+          continue;
+        }
+        
+        if (!inString) {
+          if (repaired[i] === '{' || repaired[i] === '[') {
+            braceDepth++;
+          } else if (repaired[i] === '}' || repaired[i] === ']') {
+            braceDepth--;
+            if (braceDepth === 0) {
+              lastValidPos = i;
+            }
+          }
+        }
+      }
+      
+      if (lastValidPos !== -1) {
+        repaired = repaired.substring(0, lastValidPos + 1);
+      } else {
+        // Fallback: try to close with a minimal valid structure
+        repaired = '{"updates": [], "auditSummary": "Response malformed."}';
+      }
+    }
+    
+    try {
+      return JSON.parse(repaired);
+    } catch (e2) {
+      // Last resort: return empty updates structure
+      console.error("Final JSON parse failed, returning empty updates:", e2);
+      return { updates: [], auditSummary: "Parse recovery failed." };
+    }
+  }
+}; 
 
 const AudioVisualizer: React.FC<{ stream: MediaStream | null }> = ({ stream }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -230,54 +300,30 @@ const App: React.FC = () => {
       }
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-3-flash-preview',
         contents: { parts },
         config: {
           systemInstruction: COGNITION_CORE_INSTRUCTION,
           responseMimeType: 'application/json',
-          thinkingConfig: { thinkingBudget: 4096 },
-          maxOutputTokens: 2048,
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              updates: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    type: { type: Type.STRING, description: "One of: record_deduction, update_probability, verify_deduction" },
-                    args: { 
-                      type: Type.OBJECT,
-                      properties: {
-                        id: { type: Type.STRING },
-                        title: { type: Type.STRING },
-                        description: { type: Type.STRING },
-                        probability: { type: Type.NUMBER },
-                        new_probability: { type: Type.NUMBER },
-                        reasoning: { type: Type.STRING },
-                        status: { type: Type.STRING },
-                        final_reasoning: { type: Type.STRING },
-                        evidence: { type: Type.ARRAY, items: { type: Type.STRING } }
-                      }
-                    }
-                  },
-                  required: ['type', 'args']
-                }
-              },
-              auditSummary: { type: Type.STRING, description: "Synthesis of new logic identified from visuals and text." }
-            },
-            required: ['updates', 'auditSummary']
-          }
+          thinkingConfig: { thinkingBudget: 1024 },
+          maxOutputTokens: 2048
         }
       });
 
       const text = response.text;
       if (text) {
-        const result = JSON.parse(text);
-        if (result.updates && Array.isArray(result.updates)) {
-          result.updates.forEach((u: any) => updatePalaceState(u.type, u.args));
+        try {
+          const result = safeParseJSON(text);
+          if (result.updates && Array.isArray(result.updates)) {
+            result.updates.forEach((u: any) => updatePalaceState(u.type, u.args));
+          }
+          setState(prev => ({ ...prev, lastObservation: result.auditSummary || prev.lastObservation }));
+        } catch (parseError) {
+          console.error("JSON Parse Error:", parseError);
+          console.error("Raw response text:", text);
+          console.error("Response length:", text.length);
+          throw parseError;
         }
-        setState(prev => ({ ...prev, lastObservation: result.auditSummary || prev.lastObservation }));
       }
     } catch (error) {
       console.error("Sherlock Cognition Core Failure:", error);
