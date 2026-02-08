@@ -1,6 +1,6 @@
 {
-  "name": "Copy of AI Sherlock: The Digital Mind Palace",
-  "description": "A high-tech deduction engine that analyzes live video feeds to uncover hidden details, calculate probabilities of truth, and track the evolution of a case in real-time.",
+  "name": "Aegis Deduction Engine",
+  "description": "A high-fidelity logical synthesis unit powered by Gemini 3 Pro and 2.5 Flash for parallel sensory analysis and deep forensic reasoning.",
   "requestFramePermissions": [
     "camera",
     "microphone"
